@@ -27,7 +27,6 @@ mv /etc/ssh/tmp /etc/ssh/sshd_config
 systemctl restart sshd
 ss -tlpn| grep ssh
 
-apt install git
 git config --global init.defaultBranch main
 echo
 echo "Enter git user.name"
