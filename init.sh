@@ -39,14 +39,16 @@ read $gitUserEmail
 
 git config --global user.email $gitUserEmail
 
-apt install nvim
+apt install neovim
 
+mkdir ~/.config
 mkdir ~/.config/nvim
 mv init.vim ~/.config/nvim/init.vim
 
 apt install curl
 curl -fLo ~/.local/share/nvim/site/autoload/plug.vim --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
 
+mkdir ~/.vim
 mkdir ~/.vim/plugged
 
 echo
