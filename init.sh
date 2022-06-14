@@ -6,6 +6,8 @@ apt autoremove
 apt clean
 
 timedatectl set-timezone Asia/Tokyo
+locale-gen "en_US.UTF-8"
+dpkg-reconfigure locales
 
 echo "Enter first user name(this user will be automatically granted administrative privilege)"
 read firstUserName
