@@ -29,3 +29,4 @@ if(has("termguicolors"))
 endif
 
 colorscheme dracula
+autocmd VimEnter * NERDTree
