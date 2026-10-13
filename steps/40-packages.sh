@@ -2,8 +2,10 @@
 # Step 5: base packages.
 
 step_packages() {
-  local pkgs=(git neovim curl build-essential man-db unattended-upgrades apt-listchanges)
-  [[ $DO_FAIL2BAN == 1 ]] && pkgs+=(fail2ban)
-  say "== packages: ${pkgs[*]}"
-  run apt-get install -y "${pkgs[@]}"
+  local packages=(git neovim curl build-essential man-db unattended-upgrades apt-listchanges)
+  if [[ $INSTALL_FAIL2BAN == yes ]]; then
+    packages+=(fail2ban)
+  fi
+  say "== packages: ${packages[*]}"
+  run apt-get install -y "${packages[@]}"
 }

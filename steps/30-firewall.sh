@@ -1,15 +1,28 @@
 # shellcheck shell=bash
-# Step 4: ufw (deny incoming, allow ssh). Failures are warnings: ufw often cannot
-# work inside an unprivileged LXC; use the Proxmox firewall there (--no-ufw).
+# Step 4: ufw firewall (deny incoming, allow ssh).
+# Failures are only warnings: ufw often cannot work inside an unprivileged LXC
+# container. Use the Proxmox firewall there instead (--no-ufw).
 
 step_ufw() {
-  [[ $DO_UFW == 1 ]] || { say "== ufw skipped (--no-ufw)"; return 0; }
+  if [[ $SETUP_UFW != yes ]]; then
+    say "== ufw skipped (--no-ufw)"
+    return 0
+  fi
   say "== ufw"
-  command -v ufw >/dev/null || try apt-get install -y ufw
-  if run ufw default deny incoming && run ufw default allow outgoing \
-     && run ufw allow ssh && run ufw --force enable; then
-    try ufw status verbose
+  if ! command -v ufw >/dev/null; then
+    run_or_warn apt-get install -y ufw
+  fi
+  if configure_ufw; then
+    run_or_warn ufw status verbose
   else
     warn "ufw setup failed (unprivileged LXC?); firewall NOT active, use the Proxmox firewall"
   fi
+}
+
+# configure_ufw: returns non-zero as soon as one ufw command fails.
+configure_ufw() {
+  run ufw default deny incoming || return 1
+  run ufw default allow outgoing || return 1
+  run ufw allow ssh || return 1
+  run ufw --force enable || return 1
 }

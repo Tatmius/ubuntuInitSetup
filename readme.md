@@ -31,5 +31,5 @@ sudo ./init.sh --non-interactive \
 - **Safe to re-run**: every step checks the current state first. `--dry-run` shows what would change.
 
 ## layout
-`init.sh` (options + order) · `lib/` (helpers, keys, users, sudoers, sshd) ·
+`init.sh` (main flow, reads top to bottom) · `lib/` (output, helpers, options, keys, admin, operator, sudoers, sshd) ·
 `steps/` (system, firewall, packages, git, nvim, unattended-upgrades) · `templates/`
