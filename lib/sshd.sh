@@ -22,7 +22,9 @@ CONF
   dry && return 0
   mkdir -p /run/sshd
   sshd -t || die "sshd -t failed; check $SSHD_DROPIN"
-  if sshd -T 2>/dev/null | grep -qx 'passwordauthentication no'; then
+  local eff
+  eff=$(sshd -T 2>/dev/null || true)   # capture first: grep -q on a pipe + pipefail = false alarms
+  if grep -qx 'passwordauthentication no' <<<"$eff"; then
     say "sshd: passwordauthentication no (effective)"
   else
     warn "sshd -T does not report 'passwordauthentication no'; check other sshd config files"
