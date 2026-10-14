@@ -1,0 +1,14 @@
+# Managed by ubuntuInitSetup (templates/sudoers-operator). Do not edit here; re-run init.sh.
+# @OPERATOR@ may run ONLY these exact maintenance commands as root, without a password.
+# Extra arguments are refused. In sudoers, ':' '=' ',' inside arguments must be escaped.
+# Note: apt-get upgrade runs package maintainer scripts as root (narrow, not zero risk).
+Defaults:@OPERATOR@ env_keep += "DEBIAN_FRONTEND"
+Cmnd_Alias OP_APT = /usr/bin/apt-get update, \
+    /usr/bin/apt-get -o Dpkg\:\:Options\:\:\=--force-confold -o Dpkg\:\:Options\:\:\=--force-confdef -y upgrade, \
+    /usr/bin/apt-get -y autoremove, \
+    /usr/bin/apt-get autoclean, \
+    /usr/bin/apt-get clean
+Cmnd_Alias OP_JOURNAL = /usr/bin/journalctl --vacuum-size\=[0-9]*, \
+    /usr/bin/journalctl --vacuum-time\=[0-9]*, \
+    /usr/bin/journalctl --vacuum-files\=[0-9]*
+@OPERATOR@ ALL=(root) NOPASSWD: OP_APT, OP_JOURNAL

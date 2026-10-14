@@ -1,122 +1,74 @@
 #!/usr/bin/env bash
+# init.sh - first-time setup of a fresh Ubuntu server or LXC container. Run as root.
+#
+# With no options it is interactive, as before: it asks for the sudo user name,
+# its password and git user.name / user.email.
+# Options add SSH keys, a key-only "operator" user and unattended runs.
+# See readme.md or run: ./init.sh --help
 set -euo pipefail
-
 export DEBIAN_FRONTEND=noninteractive
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 1) 基本パッケージ更新
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-apt update
-apt upgrade -y
-apt autoremove -y
-apt clean
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 2) タイムゾーン＆ロケール設定
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-timedatectl set-timezone Asia/Tokyo
-locale-gen en_US.UTF-8
-update-locale LANG=en_US.UTF-8
+# shellcheck disable=SC1091  # the files below are checked on their own
+source "$SCRIPT_DIR/lib/output.sh"    # say, warn, die, run (honours --dry-run)
+source "$SCRIPT_DIR/lib/helpers.sh"   # small checks and file helpers
+source "$SCRIPT_DIR/lib/options.sh"   # defaults, --help, argument parsing
+source "$SCRIPT_DIR/lib/keys.sh"      # collect, validate and install public SSH keys
+source "$SCRIPT_DIR/lib/admin.sh"     # the admin (sudo) user and its password
+source "$SCRIPT_DIR/lib/operator.sh"  # the key-only operator user
+source "$SCRIPT_DIR/lib/sudoers.sh"   # the operator's sudoers file
+source "$SCRIPT_DIR/lib/sshd.sh"      # turn off SSH password login
+for step_file in "$SCRIPT_DIR"/steps/*.sh; do
+  # shellcheck disable=SC1090
+  source "$step_file"                 # step_apt, step_locale, step_ufw, ...
+done
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 3) ユーザー作成（sudo 権限付与）
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-prompt_username() {
-  local name=""
-  while [[ -z "${name// /}" ]]; do
-    read -rp "Enter new sudo user name: " name
-    if [[ -z "${name// /}" ]]; then
-      echo "ユーザー名は空白不可です。再度入力してください。"
-    fi
-  done
-  echo "$name"
+main() {
+  set_defaults
+  parse_arguments "$@"
+  check_user_name "$OPERATOR_USER"
+
+  if [[ $PRINT_SUDOERS == yes ]]; then
+    render_sudoers "$OPERATOR_USER"
+    exit 0
+  fi
+
+  check_options
+  if [[ $DRY_RUN == yes ]]; then
+    say "DRY RUN: nothing will be changed"
+  fi
+
+  # Read and check all keys first, so bad input stops us before anything changes.
+  KEY_DIR=$(mktemp -d)
+  trap 'rm -rf "$KEY_DIR"' EXIT
+  collect_admin_keys "$KEY_DIR/admin.keys"
+  collect_operator_keys "$KEY_DIR/operator.keys"
+
+  # 1-2: system
+  step_apt
+  step_locale
+
+  # 3: users and SSH
+  if [[ -z $ADMIN_USER ]]; then
+    ADMIN_USER=$(prompt_username)
+    check_user_name "$ADMIN_USER"
+  fi
+  setup_admin_user "$ADMIN_USER"
+  setup_admin_keys "$ADMIN_USER" "$KEY_DIR/admin.keys"
+  setup_operator_if_keys_given "$OPERATOR_USER" "$KEY_DIR/operator.keys"
+  setup_sshd_password_login "$KEY_DIR/admin.keys"
+
+  # 4-8: firewall, packages, tools
+  step_ufw
+  step_packages
+  step_git
+  step_nvim "$ADMIN_USER"
+  step_unattended
+
+  say "Setup completed for admin '$ADMIN_USER'."
+  say "Start Neovim as $ADMIN_USER and run :PlugInstall once (if Neovim setup was not skipped)."
+  print_warnings
 }
 
-FIRST_USER_NAME=$(prompt_username)
-adduser "$FIRST_USER_NAME"
-usermod -aG sudo "$FIRST_USER_NAME"
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 4) UFW 設定
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ufw default deny incoming
-ufw default allow outgoing
-ufw allow ssh
-ufw --force enable
-ufw status verbose
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 5) 必要パッケージインストール
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-apt install -y \
-  git \
-  neovim \
-  curl \
-  build-essential \
-  man-db \
-  unattended-upgrades \
-  apt-listchanges \
-  fail2ban
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 6) Git の初期設定：main 固定
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-git config --global init.defaultBranch main
-
-read -rp "Enter git user.name: " GIT_USER_NAME
-git config --global user.name "$GIT_USER_NAME"
-
-read -rp "Enter git user.email: " GIT_USER_EMAIL
-git config --global user.email "$GIT_USER_EMAIL"
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 7) Neovim プラグインマネージャー（vim-plug）をインストール
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-runuser -l "$FIRST_USER_NAME" -c 'mkdir -p ~/.local/share/nvim/site/autoload'
-runuser -l "$FIRST_USER_NAME" -c 'curl -fLo ~/.local/share/nvim/site/autoload/plug.vim --create-dirs \
-    https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim'
-
-NVIM_CONFIG_DIR="/home/$FIRST_USER_NAME/.config/nvim"
-runuser -l "$FIRST_USER_NAME" -c "mkdir -p $NVIM_CONFIG_DIR"
-if [[ -f "./init.vim" ]]; then
-  mv "./init.vim" "$NVIM_CONFIG_DIR/init.vim"
-  chown "$FIRST_USER_NAME":"$FIRST_USER_NAME" "$NVIM_CONFIG_DIR/init.vim"
-fi
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 8) unattended-upgrades 設定（自動アップデート有効化）
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-# 8-1) /etc/apt/apt.conf.d/20auto-upgrades を上書き
-cat << 'EOF' > /etc/apt/apt.conf.d/20auto-upgrades
-APT::Periodic::Update-Package-Lists "1";
-APT::Periodic::Download-Upgradeable-Packages "1";
-APT::Periodic::AutocleanInterval "7";
-APT::Periodic::Unattended-Upgrade "1";
-EOF
-
-# 8-2) /etc/apt/apt.conf.d/50unattended-upgrades の "Allowed-Origins" を必要に応じて有効化
-# ここではセキュリティ + 標準更新も自動適用する例を示す
-cat << 'EOF' > /etc/apt/apt.conf.d/50unattended-upgrades
-Unattended-Upgrade::Allowed-Origins {
-        "${distro_id}:${distro_codename}-security";
-        "${distro_id}:${distro_codename}-updates";
-};
-Unattended-Upgrade::Mail "root";           # 必要ならメールアドレスに変更
-Unattended-Upgrade::MailOnlyOnError "true";
-Unattended-Upgrade::Automatic-Reboot "false";  # 再起動も一切したくなければ false
-EOF
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 9) Fail2Ban の簡易設定（必要なら細かく編集）
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# (例: /etc/fail2ban/jail.local をテンプレートからコピーするなど)
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 完了メッセージ
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo "Setup completed."
-echo "・Git のデフォルトブランチはすでに main に固定されています。"
-echo "・自動アップデート (unattended-upgrades) を有効化しました。"
-echo "・必要に応じて /etc/apt/apt.conf.d/50unattended-upgrades を編集してください。"
-echo "・Neovim を起動して :PlugInstall を実行してください。"
+main "$@"
